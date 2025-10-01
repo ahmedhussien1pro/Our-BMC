@@ -16,8 +16,11 @@ let currentColorSection = null;
 async function init() {
   loadTheme();
   renderCanvas();
-  await ensureDataFromDB();
+  setTimeout(() => {
+    ensureDataFromDB();
+  }, 1000);
 }
+init();
 
 // ---------- RENDER ----------
 function renderCanvas() {
@@ -28,18 +31,18 @@ function renderCanvas() {
         bg-${section.bg || 'white'} dark:bg-dark-800
         rounded-xl shadow-md p-6 border-t-4 border-${
           section.color
-        }-500" data-section="${section.id}"
+        }-600" data-section="${section.id}"
           
            data-section="${section.id}">
         <div class="flex items-center justify-between mb-4">
           <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-            <i class="fas fa-${section.icon} text-${section.color}-500"></i>
+            <i class="fas fa-${section.icon} text-${section.color}-600"></i>
             ${section.title}
           </h3>
           <div class="flex gap-2">
             ${
               state.editMode
-                ? `<button onclick="addItem('${section.id}')"  class="text-${section.color}-500 hover:text-${section.color}-700"><i class="fas fa-plus-circle"></i></button>`
+                ? `<button onclick="addItem('${section.id}')"  class="text-${section.color}-600 hover:text-${section.color}-600"><i class="fas fa-plus-circle"></i></button>`
                 : ''
             }
             ${
@@ -64,24 +67,15 @@ function renderCanvas() {
   updateEditModeUI();
 }
 
-function updateEditModeUI() {
-  document.getElementById('editModeText').textContent = state.editMode
-    ? 'Disable Edit Mode'
-    : 'Enable Edit Mode';
-  document
-    .getElementById('canvasGrid')
-    .classList.toggle('edit-mode', state.editMode);
-}
-
 function renderSection(sectionId) {
   const list = document.getElementById(`${sectionId}-list`);
   list.innerHTML = (canvasData[sectionId] || [])
     .map(
       (item, idx) => `
       <li class="flex items-start gap-2 p-1 rounded hover:bg-gray-50 dark:hover:bg-dark-900 transition group">
-        <i class="fas fa-circle text-xs mt-1" style="color:${
+        <i class="fas fa-circle text-xs mt-1 text-${
           SECTIONS.find((s) => s.id === sectionId).color
-        }"></i>
+        }-500" ></i>
         <span class="flex-1">${item}</span>
         ${
           state.editMode
@@ -98,13 +92,56 @@ function renderSection(sectionId) {
     .join('');
 }
 
+function updateEditModeUI() {
+  document.getElementById('editModeText').textContent = state.editMode
+    ? 'Disable Edit Mode'
+    : 'Enable Edit Mode';
+  document
+    .getElementById('canvasGrid')
+    .classList.toggle('edit-mode', state.editMode);
+}
+
 // ---------- SIDEBAR ----------
 window.toggleSidebar = function () {
   state.sidebarOpen = !state.sidebarOpen;
-  document
-    .getElementById('sidebar')
-    .classList.toggle('sidebar-closed', !state.sidebarOpen);
+  const sidebar = document.getElementById('sidebar');
+
+  if (state.sidebarOpen) {
+    sidebar.classList.remove('sidebar-closed');
+    setTimeout(() => {
+      document.addEventListener('click', outsideClickListener);
+      window.addEventListener('scroll', scrollListener);
+    }, 50);
+  } else {
+    sidebar.classList.add('sidebar-closed');
+    document.removeEventListener('click', outsideClickListener);
+    window.removeEventListener('scroll', scrollListener);
+  }
 };
+
+function outsideClickListener(event) {
+  const sidebar = document.getElementById('sidebar');
+  const toggleBtn = document.getElementById('sidebarToggleBtn');
+  if (
+    sidebar &&
+    !sidebar.contains(event.target) &&
+    (!toggleBtn || !toggleBtn.contains(event.target))
+  ) {
+    closeSidebar();
+  }
+}
+
+function scrollListener() {
+  closeSidebar();
+}
+
+function closeSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  state.sidebarOpen = false;
+  sidebar.classList.add('sidebar-closed');
+  document.removeEventListener('click', outsideClickListener);
+  window.removeEventListener('scroll', scrollListener);
+}
 
 // ---------- THEME ----------
 window.toggleTheme = function () {
@@ -125,7 +162,7 @@ function loadTheme() {
   }
 }
 
-// ---------- EDIT MODE + PASSWORD ----------
+// ---------- EDIT MODE  ----------
 window.toggleEditMode = function () {
   if (!state.editMode) {
     state.action = 'edit';
@@ -138,6 +175,14 @@ window.toggleEditMode = function () {
   }
 };
 
+// ---------- RESET CANVAS ----------
+window.resetCanvas = function () {
+  state.action = 'reset';
+  document.getElementById('passwordModal').classList.remove('hidden');
+  document.getElementById('passwordModal').classList.add('flex');
+};
+
+// ---------- Verify PASSWORD ----------
 window.verifyPassword = async function () {
   const input = document.getElementById('passwordInput').value;
   try {
@@ -165,10 +210,21 @@ window.verifyPassword = async function () {
   }
 };
 
+// ---------- Close PASSWORD MODAL ----------
 window.closePasswordModal = function () {
   document.getElementById('passwordModal').classList.add('hidden');
   document.getElementById('passwordInput').value = '';
 };
+
+// ---------- Perform Reset ----------
+function performReset() {
+  canvasData = { ...initialData };
+  renderCanvas();
+  showNotification('Canvas reset to initial state', 'success');
+  setTimeout(() => {
+    saveToDB();
+  }, 4000);
+}
 
 // ---------- ITEMS ----------
 window.addItem = function (sectionId) {
@@ -256,17 +312,12 @@ async function ensureDataFromDB() {
 
     if (data && data.canvasData) {
       canvasData = data.canvasData;
-      if (data.sections) {
-        data.sections.forEach((s) => {
-          const existing = SECTIONS.find((x) => x.id === s.id);
-          if (existing) Object.assign(existing, s);
-        });
-      }
       renderCanvas();
-      showNotification('Loaded from MongoDB', 'success');
+      showNotification('Loaded from DB', 'success');
       return;
     }
   } catch {
+    console.warn('DB not ready, saving initial data instead:', err.message);
     await saveToDB(true);
   }
 }
@@ -284,27 +335,13 @@ window.saveToDB = async function (isInitial = false) {
     });
     const data = await res.json();
     if (data.success && !isInitial) {
-      showNotification('Saved to MongoDB', 'success');
+      showNotification('Saved to DB', 'success');
     }
   } catch (err) {
     console.error('Save failed', err);
   }
 };
-// ---------- RESET CANVAS ----------
-window.resetCanvas = function () {
-  state.action = 'reset';
-  document.getElementById('passwordModal').classList.remove('hidden');
-  document.getElementById('passwordModal').classList.add('flex');
-};
 
-function performReset() {
-  canvasData = { ...initialData };
-  renderCanvas();
-  showNotification('Canvas reset to initial state', 'success');
-  setTimeout(() => {
-    saveToDB();
-  }, 4000);
-}
 // ---------- EXPORT ----------
 window.exportAsImage = async function () {
   showNotification('Exporting Image...', 'info');
@@ -361,5 +398,3 @@ function showNotification(text, type = 'success') {
   notif.classList.add('flex');
   setTimeout(() => notif.classList.add('hidden'), 3000);
 }
-
-init();

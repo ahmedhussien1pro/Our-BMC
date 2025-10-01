@@ -63,6 +63,6 @@ app.post('/verify-password', (req, res) => {
 const PORT = process.env.PORT || 3000;
 initDB().then(() => {
   app.listen(PORT, () =>
-    console.log(`🚀 Server running at http://localhost:${PORT}`)
+    console.log(`Server running at http://localhost:${PORT}`)
   );
 });
